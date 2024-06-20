@@ -1,0 +1,42 @@
+---
+applications:
+  - name: multi-tenant-app
+    routes:
+      - route: multi-tenant-app-03bd12c1trial.cfapps.us10-001.hana.ondemand.com
+    path: ./target/multitenantapp-0.0.1-SNAPSHOT.jar
+    memory: 1024M
+    buildpack: sap_java_buildpack
+    services:
+      - xsuaa-multi
+      - destination_multi
+      - saa_multi
+    env:
+      httpHeaders: '[ {"X-Frame-Options" : "deny"} ]'
+      IS_CLOUD_ENVIRONMENT: "true"
+      PLANT: "1220"
+      ERROR_HTTP_STATUS: "200"
+      DESTINATION: "SAP_DMC"
+      SET_LOGGING_LEVEL: '{ROOT: DEBUG, com.sap.cloud.sdk: INFO}'
+      SPRING_PROFILES_ACTIVE: 'cloud'
+      JBP_CONFIG_COMPONENTS: "jres: ['com.sap.xs.java.buildpack.jdk.SAPMachineJDK']"
+      JBP_CONFIG_SAP_MACHINE_JDK: "{ version: 17.+ }"
+      JBP_CONFIG_DEBUG: "{enabled: true}"
+
+
+  - name: approuter
+    routes:
+      - route: 'route-prefix-03bd12c1trial.cfapps.us10-001.hana.ondemand.com'
+    path: security/approuter
+    memory: 128M
+    buildpacks:
+      - nodejs_buildpack
+    env:
+      TENANT_HOST_PATTERN: 'route-prefix-(.*).cfapps.us10-001.hana.ondemand.com'
+      destinations: >
+        [
+          {"name":"multi-tenant-app","url":"https://multi-tenant-app-03bd12c1trial.cfapps.us10-001.hana.ondemand.com","forwardAuthToken":true}
+        ]
+    services:
+      - xsuaa-multi
+      - destination_multi
+      - saa_multi

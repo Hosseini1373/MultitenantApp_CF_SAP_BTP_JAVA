@@ -1,0 +1,10 @@
+{
+    "xsappname": "multi-tenant-app",
+    "appName": "multi-tenant-app",
+    "providerTenantId": "f48ae449-d6a8-48ca-bcc7-bd0c4027846a",
+    "displayName": "multi tenant example application",
+    "appUrls": {
+      "getDependencies": "https://multi-tenant-app.cfapps.cfapps.eu20-001.hana.ondemand.com/dependencies",
+      "onSubscription": "https://multi-tenant-app.cfapps.cfapps.eu20-001.hana.ondemand.com/subscription/{tenantId}"
+    }
+  }
