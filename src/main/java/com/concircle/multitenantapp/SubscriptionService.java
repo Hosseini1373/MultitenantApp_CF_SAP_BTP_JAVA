@@ -11,17 +11,26 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.PathVariable;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sap.cloud.sdk.cloudplatform.connectivity.Destination;
 import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationAccessor;
+import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationLoader;
+import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationOptions;
+import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationServiceOptionsAugmenter;
+import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationServiceRetrievalStrategy;
+import com.sap.cloud.sdk.cloudplatform.connectivity.DestinationServiceTokenExchangeStrategy;
 import com.sap.cloud.sdk.cloudplatform.connectivity.HttpClientAccessor;
 import com.sap.cloud.sdk.cloudplatform.connectivity.HttpDestination;
 
 import io.pivotal.cfenv.core.CfEnv;
 import io.pivotal.cfenv.core.CfService;
+import io.vavr.API;
+import io.vavr.control.Try;
 import lombok.extern.log4j.Log4j;
 
 import java.io.IOException;
@@ -58,6 +67,9 @@ public class SubscriptionService {
     private final List<String> relevantServices = new ArrayList<>();
     private final String APP_ROUTER_NAME = "approuter";
     private final String ROUTE_PREFIX = "route-prefix";
+    // Unfortunately, there is no out-of-the-box access of this API when you are in the context of 
+    // an application. The code assumes a destination with the name cf_api in the sample implementation 
+    // which contains the access data for the CF API
     private final String cfApiDestinationName = "cf_api";
     private final List<String> services = new ArrayList<>(Arrays.asList("destination_multi"));
 
@@ -77,7 +89,7 @@ public class SubscriptionService {
 
     private String getCfApiUri() {
         JSONObject vcapApplication = getVcapApplication();
-        return vcapApplication.getString("cf_api");
+        return vcapApplication.getString(cfApiDestinationName);
     }
 
     private String getOrganizationGuid() {
@@ -174,7 +186,7 @@ public class SubscriptionService {
     //     String orgGuid = getVcapApplication().getString("organization_id");
 
     //     JSONObject vcapApplication = getVcapApplication();
-    //     String cfApiBaseUri = vcapApplication.getString("cf_api");
+    //     String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
 
     //     // CfEnv cfEnv = new CfEnv();
     //     // cfApiBaseUri = cfEnv.getApp().getMap().getOrDefault(cfApiDestinationName, "https://api.cf.us10-001.hana.ondemand.com").toString();
@@ -207,7 +219,7 @@ public class SubscriptionService {
         JSONObject vcapApplication = getVcapApplication();
         String spaceGuid = vcapApplication.getString("space_id");
         String orgGuid = vcapApplication.getString("organization_id");
-        String cfApiBaseUri = vcapApplication.getString("cf_api");
+        String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
 
         Guids guids = new Guids("", "", "");
         // HttpDestination destination = DestinationAccessor.getDestination("cfApiDestination").asHttp();
@@ -224,10 +236,45 @@ public class SubscriptionService {
 
     private String fetchGuid(String path) throws IOException {
         JSONObject vcapApplication = getVcapApplication();
-        String cfApiBaseUri = vcapApplication.getString("cf_api");
+        String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
         // String cfApiBaseUri="https://api.cf.us10-001.hana.ondemand.com";
         log.info("cfApiBaseUri: "+cfApiBaseUri);
-        HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        log.info("cfApiDestinationName:"+cfApiDestinationName);
+        // HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+
+            Destination destination=null;
+            DestinationLoader loader = DestinationAccessor.getLoader();
+            DestinationOptions.Builder optionsBuilder = DestinationOptions.builder();
+    
+            // if ("f48ae449-d6a8-48ca-bcc7-bd0c4027846a".equals(tokenZid)) {
+            //     // Handle provider tenant scenario
+            //     optionsBuilder.augmentBuilder(
+            //         DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+            //     );
+            // } else {
+                // Handle customer tenant scenario
+                optionsBuilder.augmentBuilder(
+                    DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+                );
+            // }
+    
+            optionsBuilder.augmentBuilder(
+                DestinationServiceOptionsAugmenter.augmenter().tokenExchangeStrategy(DestinationServiceTokenExchangeStrategy.FORWARD_USER_TOKEN)
+            );
+    
+            DestinationOptions options = optionsBuilder.build();
+    
+            Try<Destination> destinationTry = loader.tryGetDestination(cfApiDestinationName, options);
+    
+            if (destinationTry.isSuccess()) {
+                destination = destinationTry.get();
+                log.info("Destination retrieved successfully.");
+            } else {
+                Throwable exception = destinationTry.getCause();
+                log.error("Error retrieving destination: ", exception);
+            }
+
+
         log.info("The destination constructor worked");
         HttpClient httpClient = HttpClientAccessor.getHttpClient(destination);
 
@@ -265,7 +312,7 @@ public class SubscriptionService {
 
     // private CompletableFuture<String> fetchAppGuid(String orgGuid, String spaceGuid, String appName) {
     //     JSONObject vcapApplication = getVcapApplication();
-    //     String cfApiBaseUri = vcapApplication.getString("cf_api");
+    //     String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
     //     Guids guids = new Guids("", "", "");
     //     HttpDestination destination = DestinationAccessor.getDestination("cfApiDestination").asHttp();
     //     guids.setSpaceGuid(spaceGuid);
@@ -307,7 +354,7 @@ public class SubscriptionService {
 
     // private CompletableFuture<Guids> fetchDomainGuid(String appGuid, String appName) throws UnsupportedEncodingException {
     //     JSONObject vcapApplication = getVcapApplication();
-    //     String cfApiBaseUri = vcapApplication.getString("cf_api");
+    //     String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
 
     //     String url = String.format("/v3/domains?names=%s", URLEncoder.encode(getLandscape(), StandardCharsets.UTF_8.toString()));
     //     HttpRequest request = HttpRequest.newBuilder()
@@ -357,9 +404,41 @@ public class SubscriptionService {
         log.info("binding route with GUID: {}", routeGuid);
         log.info("the guids in bindRoute are: "+guids.getAppGuid()+" "+guids.getDomainGuid()+" "+guids.getSpaceGuid());
         JSONObject vcapApplication = getVcapApplication();
-        String cfApiBaseUri = vcapApplication.getString("cf_api");
-        HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
-        log.info(DestinationAccessor.getDestination(cfApiDestinationName).getPropertyNames().toString());
+        String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
+        // HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        // log.info(DestinationAccessor.getDestination(cfApiDestinationName).getPropertyNames().toString());
+        Destination destination=null;
+            DestinationLoader loader = DestinationAccessor.getLoader();
+            DestinationOptions.Builder optionsBuilder = DestinationOptions.builder();
+    
+            // if ("f48ae449-d6a8-48ca-bcc7-bd0c4027846a".equals(tokenZid)) {
+            //     // Handle provider tenant scenario
+            //     optionsBuilder.augmentBuilder(
+            //         DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+            //     );
+            // } else {
+                // Handle customer tenant scenario
+                optionsBuilder.augmentBuilder(
+                    DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+                );
+            // }
+    
+            optionsBuilder.augmentBuilder(
+                DestinationServiceOptionsAugmenter.augmenter().tokenExchangeStrategy(DestinationServiceTokenExchangeStrategy.FORWARD_USER_TOKEN)
+            );
+    
+            DestinationOptions options = optionsBuilder.build();
+    
+            Try<Destination> destinationTry = loader.tryGetDestination(cfApiDestinationName, options);
+    
+            if (destinationTry.isSuccess()) {
+                destination = destinationTry.get();
+                log.info("Destination retrieved successfully.");
+            } else {
+                Throwable exception = destinationTry.getCause();
+                log.error("Error retrieving destination: ", exception);
+            }
+
         HttpClient httpClient = HttpClientAccessor.getHttpClient(destination);
         log.info("Binding route with GUID: {}", routeGuid);
  
@@ -405,7 +484,7 @@ public class SubscriptionService {
     // private String createRoute(String subscribedSubdomain, Guids guids) throws IOException {
     //     log.info("Creating route for subdomain: {}", subscribedSubdomain);
     //     JSONObject vcapApplication = getVcapApplication();
-    //     String cfApiBaseUri = vcapApplication.getString("cf_api");
+    //     String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
     //     // CfEnv cfEnv = new CfEnv();
     //     // log.info("Application details from cfEnv: {}", cfEnv.getApp());
     //     // log.info("Service details from cfEnv: {}", cfEnv.findAllServices());
@@ -434,8 +513,39 @@ public class SubscriptionService {
         log.info("Creating route for subdomain: {}", subscribedSubdomain);
 
         JSONObject vcapApplication = getVcapApplication();
-        String cfApiBaseUri = vcapApplication.getString("cf_api");
-        HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
+        // HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        Destination destination=null;
+            DestinationLoader loader = DestinationAccessor.getLoader();
+            DestinationOptions.Builder optionsBuilder = DestinationOptions.builder();
+    
+            // if ("f48ae449-d6a8-48ca-bcc7-bd0c4027846a".equals(tokenZid)) {
+            //     // Handle provider tenant scenario
+            //     optionsBuilder.augmentBuilder(
+            //         DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+            //     );
+            // } else {
+                // Handle customer tenant scenario
+                optionsBuilder.augmentBuilder(
+                    DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+                );
+            // }
+    
+            optionsBuilder.augmentBuilder(
+                DestinationServiceOptionsAugmenter.augmenter().tokenExchangeStrategy(DestinationServiceTokenExchangeStrategy.FORWARD_USER_TOKEN)
+            );
+    
+            DestinationOptions options = optionsBuilder.build();
+    
+            Try<Destination> destinationTry = loader.tryGetDestination(cfApiDestinationName, options);
+    
+            if (destinationTry.isSuccess()) {
+                destination = destinationTry.get();
+                log.info("Destination retrieved successfully.");
+            } else {
+                Throwable exception = destinationTry.getCause();
+                log.error("Error retrieving destination: ", exception);
+            }
         HttpClient httpClient = HttpClientAccessor.getHttpClient(destination);
 
 
@@ -455,9 +565,7 @@ public class SubscriptionService {
         domain.put("data", domainData);
         createRouteBody.put("relationships", createRouteBody.getJSONObject("relationships").put("domain", domain));
         log.info("Body of post request to routes:"+createRouteBody.toString());
-        // JSONObject cfApiDestination = new JSONObject();
-        // cfApiDestination.put("destinationName", "cf-api");
-        // cfApiDestination.put("useCache", true);
+
         HttpPost request = new HttpPost(cfApiBaseUri + "/v3/routes");
         request.setHeader("Content-Type", "application/json");
         request.setEntity(new StringEntity(createRouteBody.toString(), ContentType.APPLICATION_JSON));
@@ -504,8 +612,39 @@ public class SubscriptionService {
         // CloseableHttpClient client = HttpClients.createDefault();
 
         JSONObject vcapApplication = getVcapApplication();
-        String cfApiBaseUri = vcapApplication.getString("cf_api");
-        HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        String cfApiBaseUri = vcapApplication.getString(cfApiDestinationName);
+        // HttpDestination destination = DestinationAccessor.getDestination(cfApiDestinationName).asHttp();
+        Destination destination=null;
+            DestinationLoader loader = DestinationAccessor.getLoader();
+            DestinationOptions.Builder optionsBuilder = DestinationOptions.builder();
+    
+            // if ("f48ae449-d6a8-48ca-bcc7-bd0c4027846a".equals(tokenZid)) {
+            //     // Handle provider tenant scenario
+            //     optionsBuilder.augmentBuilder(
+            //         DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+            //     );
+            // } else {
+                // Handle customer tenant scenario
+                optionsBuilder.augmentBuilder(
+                    DestinationServiceOptionsAugmenter.augmenter().retrievalStrategy(DestinationServiceRetrievalStrategy.ALWAYS_PROVIDER)
+                );
+            // }
+    
+            optionsBuilder.augmentBuilder(
+                DestinationServiceOptionsAugmenter.augmenter().tokenExchangeStrategy(DestinationServiceTokenExchangeStrategy.FORWARD_USER_TOKEN)
+            );
+    
+            DestinationOptions options = optionsBuilder.build();
+    
+            Try<Destination> destinationTry = loader.tryGetDestination(cfApiDestinationName, options);
+    
+            if (destinationTry.isSuccess()) {
+                destination = destinationTry.get();
+                log.info("Destination retrieved successfully.");
+            } else {
+                Throwable exception = destinationTry.getCause();
+                log.error("Error retrieving destination: ", exception);
+            }
         HttpClient httpClient = HttpClientAccessor.getHttpClient(destination);
 
 
